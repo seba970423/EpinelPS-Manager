@@ -1,0 +1,27 @@
+.epinel/
+__pycache__/
+*.py[cod]
+*.part
+*.zip
+*.tar.gz
+startup-hook/obj/
+startup-hook/bin/
+
+# Local installations, save data, imported game resources and credentials.
+/cache/
+/logs/
+/backups/
+/nikke_Data/
+/db.json
+/epinelps.db*
+/gamecommon.json
+/gameconfig.json
+/appsettings.json
+/serverselectorsettings.json
+/*.exe
+/*.pfx
+/*.pem
+/*.cer
+/*.key
+.env
+.env.*
