@@ -226,8 +226,30 @@ class ManagedStartup(unittest.TestCase):
     def test_offline_update_failure_keeps_installed_version(self):
         old = self.make_version("a")
         self.set_active(old)
-        with patch.object(self.manager.network, "latest", side_effect=ManagedError("offline")):
+        with patch.object(self.manager.network, "approved", side_effect=ManagedError("offline")):
             self.assertEqual(self.manager.candidate(), old)
+
+    def test_stable_release_is_recorded_only_after_successful_startup(self):
+        from epinel_manager.releases import bundled_release
+        from dataclasses import replace
+        version = self.make_version("a")
+        self.set_active(version)
+        pin = replace(bundled_release(), commit=version.name)
+        self.manager.selected_build = pin
+        self.assertTrue(self.manager.launch_once(version))
+        self.assertEqual(self.manager.state["stable_release"], pin.record())
+
+    def test_failed_stable_startup_preserves_previous_approval_and_saves(self):
+        from epinel_manager.releases import bundled_release
+        from dataclasses import replace
+        old, bad = self.make_version("a"), self.make_version("b", fail=True)
+        self.set_active(old)
+        previous = replace(bundled_release(), commit=old.name)
+        self.manager.state["stable_release"] = previous.record()
+        self.manager.selected_build = replace(previous, commit=bad.name, sequence=previous.sequence + 1)
+        self.assertFalse(self.manager.launch_once(bad))
+        self.assertEqual(self.manager.state["stable_release"], previous.record())
+        self.assertEqual(self.progress(), ("original", "original"))
 
     def test_import_does_not_modify_original_files(self):
         # A separate manager imports a traditional server layout, including both saves.

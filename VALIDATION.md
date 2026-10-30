@@ -1,4 +1,52 @@
-# Validation — 2026-10-26
+# Validation history
+
+## Controlled server releases — 2026-10-30
+
+EpinelPS Managed **0.2.0**, Linux x86-64.
+
+Normal startup resolves the project-owned stable pin and downloads only the
+project's archived release. Upstream main is queried only after an explicit
+experimental-channel selection. Existing settings, paths, data and disabled
+update preferences survive the policy change.
+
+The pinned upstream build is `e31e66386bba0128bacca9634205e444bf408041`, workflow
+`40219500183`, artifact `12609476148`, size **67,236,646 bytes**. Its original ZIP
+SHA-256 is `8b62e6b5a472e6845a215692a106843ac40bc314f9e0c602e2517f09bd3c77b6`.
+The executable SHA-256 is
+`ce6c778c4668d9595d5830f2124006f9410e8cc8c0e308ae79bc17f6b8833215`.
+GitHub's workflow/artifact metadata and the actual downloaded bytes were checked.
+The existing strict-CA repair successfully repaired that actual upstream pair.
+
+Verification for this change:
+
+- **91 automated tests**, including four native migration tests against this exact
+  upstream executable. Native tests use isolated fixture saves and databases.
+- New tests cover project-only stable resolution, explicit experimental selection,
+  malformed/incompatible pins, missing release downloads without upstream fallback,
+  preservation of newer or unknown installations, explicit stable adoption,
+  monotonic accepted releases, executable integrity, channel persistence without
+  setup prompts, approval only after successful startup and rollback on failure.
+- Publication bootstrap checks reject wrong workflow commits, pull-request builds,
+  failed runs, expired artifacts, changed sizes and wrong archive digests.
+- Existing tests still cover download recovery, strict TLS, both client trust stores,
+  single-folder discovery, port conflicts, SQLite WAL snapshots, application update
+  rollback and preservation of gameplay progress after accepted startup.
+- The application updater copies the bundled pin while preserving saved settings
+  and data. The startup helper binary remains unchanged.
+- Python, shell and workflow syntax were checked. GitHub CI runs Python 3.10/3.14
+  regressions and a Python 3.12 run with all native tests enabled. Publishing the
+  approved server and manager package requires these checks to pass on main.
+
+The server release archives the unchanged verified upstream ZIP, its corresponding
+source archive and license, the pin and SHA-256 sums. Runtime stable downloads do
+not depend on upstream's temporary Actions artifact remaining available. New
+server pins require a separate maintainer decision and a new release sequence.
+
+No actual client login or gameplay was run here. Native checks verify database
+migration compatibility; local TLS fixtures verify startup/connection handling.
+Choosing a stable pin is not evidence that every gameplay feature works.
+
+## Previous 0.1.4 validation — 2026-10-26
 
 EpinelPS Managed 0.1.4, Linux x86-64.
 

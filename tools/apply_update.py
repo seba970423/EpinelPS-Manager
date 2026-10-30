@@ -16,8 +16,8 @@ from epinel_manager.manager import pick_directory
 from epinel_manager.network import sha256
 
 TOP_LEVEL = {"EpinelPS", "Start-EpinelPS.sh", "Install-Desktop-Shortcut.sh", "Apply-Update.sh",
-             "README.md", "VALIDATION.md", "LICENSE", ".gitignore"}
-FOLDERS = {"epinel_manager", "tools", "startup-hook", "tests"}
+             "README.md", "VALIDATION.md", "LICENSE", ".gitignore", "server-release.json"}
+FOLDERS = {"epinel_manager", "tools", "startup-hook", "tests", "docs"}
 
 
 def apply_update(source, target):

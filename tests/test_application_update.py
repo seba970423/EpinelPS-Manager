@@ -26,6 +26,7 @@ class ApplicationUpdate(unittest.TestCase):
         (self.source / "Start-EpinelPS.sh").write_bytes(b"new start script")
         (self.source / "epinel_manager").mkdir()
         (self.source / "epinel_manager/manager.py").write_bytes(b"new manager code")
+        (self.source / "server-release.json").write_bytes(b'{"new": "project server pin"}')
         shutil.copytree(MODULE.parent.parent / "epinel_manager/bin", self.source / "epinel_manager/bin")
         (self.target / "EpinelPS").write_bytes(b"old application")
         write_json(self.target / ".epinel/state.json", {"active": "imported", "rejected": ["b" * 40]})
@@ -43,6 +44,7 @@ class ApplicationUpdate(unittest.TestCase):
         self.assertEqual((self.target / ".epinel/data/db.json").read_bytes(), self.save)
         self.assertTrue((self.target / "epinel_manager/bin/EpinelPS.Managed.StartupHook.dll").is_file())
         self.assertTrue((self.target / "Start-EpinelPS.sh").stat().st_mode & 0o111)
+        self.assertEqual((self.target / "server-release.json").read_bytes(), (self.source / "server-release.json").read_bytes())
 
     def test_running_manager_blocks_application_update(self):
         with (self.target / ".epinel/manager.lock").open("a+") as lock:

@@ -34,6 +34,10 @@ from .connection import (PROBE_DOMAINS, ROUTE_DOMAINS, bundles, host_addresses,
 STARTUP_REVISION = 2
 
 
+class InstalledReleaseMismatch(ManagedError):
+    """An already active approved executable changed; do not silently run it."""
+
+
 def pick_directory(title: str, start: Path | None = None) -> Path | None:
     start = start or Path.home()
     if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
@@ -151,10 +155,13 @@ class Manager:
         self.log = log
         self.network = network or Network(log)
         self.settings_path, self.state_path = self.private / "settings.json", self.private / "state.json"
-        self.settings = {"auto_update": True, "startup_timeout": 900, "launcher_dirs": [], **read_json(self.settings_path)}
+        self.settings = {"auto_update": True, "update_channel": "stable", "startup_timeout": 900,
+                         "launcher_dirs": [], **read_json(self.settings_path)}
         self.state = read_json(self.state_path)
         self.child = None
         self.ready = False
+        self.selected_build = None
+        self.adopt_stable = False
 
     def save_settings(self):
         write_json(self.settings_path, self.settings)
@@ -305,13 +312,36 @@ class Manager:
             link.symlink_to(target, target_is_directory=name in ("cache", "logs"))
 
     def candidate(self, offline=False):
+        self.selected_build = None
         active = self.active()
-        if offline or not self.settings["auto_update"]:
+        if offline or (not self.settings["auto_update"] and not self.adopt_stable):
             return active
-        self.log("Checking upstream for a newer successful Linux build…")
+        channel = self.settings["update_channel"]
+        if channel not in ("stable", "experimental"):
+            raise ManagedError("Unknown update channel. Use --channel stable or --channel experimental.")
+        self.log("Checking this project's approved server release…" if channel == "stable" else
+                 "Experimental channel: checking upstream's latest successful Linux build…")
         try:
-            build = self.network.latest()
+            build = self.network.approved() if channel == "stable" else self.network.latest()
+            if channel == "stable":
+                accepted = self.state.get("stable_release", {})
+                if (build.sequence < accepted.get("sequence", 0) or
+                        (build.sequence == accepted.get("sequence") and build.record() != accepted)):
+                    raise ManagedError("The server pin is older than, or conflicts with, the accepted release. Keeping the installed build.")
+                if active and active.name != build.commit and not self.adopt_stable:
+                    installed = read_json(active / ".build.json")
+                    run = installed.get("run_id")
+                    exact_binary = build.executable_digest and sha256(active / "EpinelPS") == build.executable_digest
+                    if not exact_binary and (type(run) is not int or run <= 0 or run > build.run_id):
+                        self.log("The installed server is newer than the stable pin, or its version is unknown. "
+                                 "Keeping it to avoid an automatic save downgrade. "
+                                 "Use --adopt-stable only when you intend to switch to the pinned version; backups remain enabled.")
+                        return active
+                self.log(f"Approved release: {build.release} · server {build.commit[:12]}")
             if build.commit == self.state.get("active"):
+                if build.executable_digest and sha256(active / "EpinelPS") != build.executable_digest:
+                    raise InstalledReleaseMismatch("The installed server does not match the approved executable checksum. Restore the verified version before starting it.")
+                self.selected_build = build
                 self.log(f"Already current: {build.commit[:12]}")
                 return active
             if build.commit in self.state.get("rejected", []):
@@ -324,13 +354,20 @@ class Manager:
                 shutil.rmtree(staging, ignore_errors=True)
                 try:
                     extract(archive, staging)
-                    write_json(staging / ".build.json", {"commit": build.commit, "run_id": build.run_id, "artifact_id": build.artifact_id, "sha256": build.digest})
+                    if build.executable_digest and sha256(staging / "EpinelPS") != build.executable_digest:
+                        raise ManagedError("The server executable does not match the project's approved checksum.")
+                    write_json(staging / ".build.json", build.record())
                     ensure_certificate(staging, self.private / "certificates", self.network, build.commit, self.log)
                     os.replace(staging, destination)
                 except BaseException:
                     shutil.rmtree(staging, ignore_errors=True)
                     raise
+            if build.executable_digest and sha256(destination / "EpinelPS") != build.executable_digest:
+                raise ManagedError("The cached server does not match the project's approved executable checksum.")
+            self.selected_build = build
             return destination
+        except InstalledReleaseMismatch:
+            raise
         except (ManagedError, OSError, ValueError) as exc:
             if not active:
                 raise
@@ -656,6 +693,9 @@ class Manager:
                     self.state = {**old_state, "active": version.name,
                                   "previous": old_state.get("active") if old_state.get("active") != version.name else old_state.get("previous"),
                                   "last_backup": snapshot.name}
+                    if (self.selected_build and self.selected_build.release
+                            and self.selected_build.commit == version.name):
+                        self.state["stable_release"] = self.selected_build.record()
                     write_json(self.state_path, self.state)
                     # Once acceptance is durable, a later crash must NEVER
                     # restore the pre-launch save and erase game progress.
@@ -742,7 +782,7 @@ class Manager:
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Automatic EpinelPS upstream updates and certificate repair for Linux x86-64.")
+    parser = argparse.ArgumentParser(description="Project-approved EpinelPS updates and certificate repair for Linux x86-64.")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--setup", action="store_true", help="Choose one NIKKE install folder and discover its game and launcher")
     parser.add_argument("--import", dest="import_path", type=Path, help="Import an existing server without changing the original")
@@ -752,7 +792,11 @@ def main(argv=None):
     parser.add_argument("--repair", action="store_true", help="Repair certificates without starting the server")
     parser.add_argument("--status", action="store_true", help="Show the saved installation and settings")
     parser.add_argument("--retry-update", action="store_true", help="Retry a build previously rejected after failed startup")
+    parser.add_argument("--channel", choices=("stable", "experimental"), help="Remember the update channel; stable follows this project's pin")
+    parser.add_argument("--adopt-stable", action="store_true", help="Explicitly switch a newer/unknown server to the stable pin, retaining startup backups")
     args = parser.parse_args(argv)
+    if args.adopt_stable and (args.channel == "experimental" or args.offline or args.repair or args.status):
+        parser.error("--adopt-stable requires an online stable-channel startup")
     if sys.platform != "linux" or platform.machine() not in ("x86_64", "amd64"):
         print("This build supports Linux x86-64.", file=sys.stderr)
         return 1
@@ -780,6 +824,10 @@ def main(argv=None):
         try:
             manager.lock()
             log(f"EpinelPS Managed {__version__}")
+            if args.channel or args.adopt_stable:
+                manager.settings["update_channel"] = args.channel or "stable"
+                manager.save_settings()
+            manager.adopt_stable = args.adopt_stable
             if args.status:
                 print(json.dumps({"state": manager.state, "settings": manager.settings}, indent=2))
                 return 0
@@ -812,6 +860,8 @@ def main(argv=None):
         finally:
             for sig, handler in previous_handlers.items():
                 signal.signal(sig, handler)
+            if getattr(manager, "lockfile", None):
+                manager.lockfile.close()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "channel": "stable",
+  "sequence": 1,
+  "release": "server-2026.10.30.1",
+  "minimum_manager_version": "0.2.0",
+  "upstream_repository": "EpinelPS/EpinelPS",
+  "server": {
+    "commit": "e31e66386bba0128bacca9634205e444bf408041",
+    "run_id": 40219500183,
+    "artifact_id": 12609476148,
+    "sha256": "8b62e6b5a472e6845a215692a106843ac40bc314f9e0c602e2517f09bd3c77b6",
+    "size": 67236646,
+    "executable_sha256": "ce6c778c4668d9595d5830f2124006f9410e8cc8c0e308ae79bc17f6b8833215"
+  },
+  "validation_scope": "Manager regression tests, real upstream database migrations, archive integrity and strict certificate repair. Game login and gameplay require separate testing."
+}

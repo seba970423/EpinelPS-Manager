@@ -11,31 +11,16 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
-from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from . import __version__
 from .common import ManagedError
+from .releases import ARTIFACT, MANIFEST_URL, NIGHTLY, REPO, Build, parse_manifest
 
-REPO = "EpinelPS/EpinelPS"
 WORKFLOW = ".github/workflows/dotnet-desktop.yml"
-ARTIFACT = "EpinelPS_linux_x64"
 API = "https://api.github.com"
 RAW = "https://raw.githubusercontent.com"
-NIGHTLY = "https://nightly.link"
 RETRY_ERRORS = (OSError, urllib.error.URLError, http.client.HTTPException)
-
-
-@dataclass(frozen=True)
-class Build:
-    commit: str
-    run_id: int
-    artifact_id: int
-    digest: str
-    size: int
-
-    @property
-    def url(self) -> str:
-        return f"{NIGHTLY}/{REPO}/actions/runs/{self.run_id}/{ARTIFACT}.zip"
 
 
 class Network:
@@ -46,7 +31,7 @@ class Network:
 
     def open(self, url, headers=None):
         request = urllib.request.Request(url, headers={
-            "User-Agent": "EpinelPS-Managed/0.1.0",
+            "User-Agent": f"EpinelPS-Managed/{__version__}",
             "Accept": "application/vnd.github+json" if url.startswith(API) else "*/*",
             "Accept-Encoding": "identity",
             **(headers or {}),
@@ -99,6 +84,15 @@ class Network:
                     raise ManagedError("The artifact and workflow commit do not match.")
                 return Build(commit, int(run["id"]), int(artifact["id"]), digest[7:], int(artifact["size_in_bytes"]))
         raise ManagedError("No downloadable successful Linux build is available.")
+
+    def approved(self) -> Build:
+        # Only the project-owned pin decides the stable version. Its ZIP is
+        # published to this project's Releases after CI, never fetched from main.
+        try:
+            document = json.loads(self.get(MANIFEST_URL, limit=65536))
+        except ValueError as exc:
+            raise ManagedError("The project did not return a valid server pin; keeping the installed build.") from exc
+        return parse_manifest(document)
 
     def download(self, build: Build, destination: Path) -> Path:
         destination.parent.mkdir(parents=True, exist_ok=True)

@@ -1,10 +1,10 @@
-# EpinelPS Managed 0.1.4 — Linux x86-64
+# EpinelPS Managed 0.2.0 — Linux x86-64
 
 A community-maintained Linux launcher for
 [EpinelPS](https://github.com/EpinelPS/EpinelPS) local-server installations.
-It downloads upstream's compiled server, verifies the exact build, checks its
-certificate chain, repairs the game and Linux launcher's trust, and starts the
-server. Upstream updates cannot replace the maintenance launcher.
+It downloads the exact compiled server approved by this project, verifies the
+build, checks its certificate chain, repairs the game and Linux launcher's trust,
+and starts the server. The normal update channel follows this project's releases.
 
 > **Independent project.** EpinelPS Managed is not affiliated with, sponsored by,
 > or endorsed by any game developer or publisher, or by the upstream EpinelPS
@@ -21,6 +21,40 @@ before using or publishing it.
 [client setup in the game's own prefix](#first-time-winebottles-setup) before
 starting the manager. The maintenance launcher imports an existing local-server
 installation; it does not install or run the upstream server switcher for you.
+
+## Controlled server updates
+
+**Normal startup follows this project's pinned server release.** A successful
+upstream commit or build does not automatically become an update for users.
+Your usual `./EpinelPS` checks the project-owned `server-release.json`, downloads
+its exact approved archive from this repository's Releases, and applies the
+existing startup, certificate, trust and save-recovery checks.
+
+The initial pin is **server-2026.10.30.1**, upstream commit
+`e31e66386bba0128bacca9634205e444bf408041`. Its archive and executable have
+recorded SHA-256 digests. The project archives the unchanged server ZIP and its
+corresponding source after CI passes, so upstream build-artifact expiry does not
+remove the stable download. Verification covers the manager, database migrations
+and certificate repair; it does not certify every gameplay feature.
+
+Existing settings and game locations are preserved. A known newer server, or an
+installation whose version cannot be identified, stays installed to avoid an
+automatic save downgrade. If you deliberately want to switch that installation
+to the pin, close the game/server and run `./EpinelPS --adopt-stable`. An imported
+executable that already matches the pin needs no extra confirmation. Save
+snapshots and failed-start rollback remain enabled during adoption.
+
+`./EpinelPS --channel experimental` explicitly opts into upstream's latest
+successful build. `./EpinelPS --channel stable` switches the remembered policy
+back. Returning to stable preserves a newer installed version; it does not force
+older code onto its saves. Use `--offline` to skip all update checks for one launch.
+A missing pin, unpublished release or failed download keeps the installed server;
+the stable channel never silently falls back to upstream's latest build.
+
+The manager itself is updated using `Apply-Update.sh` as described below. See
+[server release policy](docs/SERVER_RELEASES.md) for promotion and compatibility
+rules, and [Releases](https://github.com/seba970423/EpinelPS-Manager/releases) for
+manager packages and archived approved servers.
 
 ## Updating an existing installation
 
@@ -142,15 +176,16 @@ prompt is the fallback. Server/import/update folder selection can also use Tk.
   Occupied ports produce a clear message, including the process name/PID when
   available; they do not mark a healthy upstream build as broken or trigger a
   fallback. Close the other server normally and start again.
-- Check successful **push builds from upstream main**, excluding pull-request
-  builds and unrelated workflows. The update is a precompiled Linux build, not a
-  source checkout that requires building on your laptop.
+- Check this project's approved server pin and archived release. Only the optional
+  experimental channel searches successful upstream main-branch push builds.
+  Updates use precompiled Linux builds; users do not need to compile the server.
 - Resolve an immutable workflow run and artifact. Download with streaming
   progress, a 30-second socket inactivity limit, and up to four attempts. Partial
   downloads resume when the server supports HTTP ranges; otherwise they restart
   cleanly. There is no 100-second whole-download limit.
-- Verify the full archive against **GitHub's SHA-256 artifact digest**. Reject
-  missing digests, wrong sizes, malformed packages, traversal paths and symlinks.
+- Verify the archive against the **pinned SHA-256 and size**, originally recorded
+  from GitHub's upstream artifact metadata, and verify the pinned executable
+  digest too. Reject missing digests, malformed packages, traversal paths and symlinks.
 - Fetch the public CA from **that same upstream commit**. Validate strict X.509
   structure (including CA key usage), dates, chain, required hostnames, server
   usage, and private-key correspondence.
@@ -225,7 +260,7 @@ run the whole server as root. This requires distribution `setcap`/`getcap` tools
 and a working polkit agent. Protected game trust files likewise use a normal
 authentication dialog when a repair requires it.
 
-Upstream updates are automatic by default. A successful build/startup does not
+Approved server updates are automatic by default. A successful build/startup does not
 prove that every game feature works: the check verifies local server startup and
 TLS, not actual game login or gameplay. Preserve your original installation as
 an additional recovery option.
@@ -237,6 +272,9 @@ Normal startup requires no arguments. These are optional power-user controls:
 | Command | Purpose |
 | --- | --- |
 | `./EpinelPS --offline` | Start the installed build without checking for updates. |
+| `./EpinelPS --channel stable` | Remember this project's approved server channel (default). |
+| `./EpinelPS --channel experimental` | Explicitly remember upstream's latest successful build channel. |
+| `./EpinelPS --adopt-stable` | Intentionally switch a newer/unknown installation to the stable pin, with startup backups. |
 | `./EpinelPS --status` | Show the installed version and remembered paths. |
 | `./EpinelPS --setup` | Paste one installation folder again, discover its components, then start. |
 | `./EpinelPS --repair` | Check and repair certificates without starting the server. |
@@ -245,7 +283,8 @@ Normal startup requires no arguments. These are optional power-user controls:
 | `./EpinelPS --game /path/to/game --launcher /path/to/launcher` | Explicitly remember paths; `--launcher` may be repeated. |
 
 Maintenance settings are in `.epinel/settings.json`; `auto_update` can be set to
-`false`, and `startup_timeout` defaults to 900 seconds to allow asset preparation.
+`false`, `update_channel` defaults to `stable`, and `startup_timeout` defaults to
+900 seconds to allow asset preparation.
 Startup logs are in `.epinel/manager.log`; connection checks are in `.epinel/connection-report.txt`; upstream logs are in `.epinel/data/logs`.
 Version archives and snapshots are retained in this first release; keep an eye on
 disk space if you update frequently.
@@ -299,6 +338,12 @@ but is rejected by strict verification. Tests cover automatic repair, stable
 local-CA reuse, live strict-TLS rejection, one-time retry of affected builds, and
 exclusion of launcher log folders. See [VALIDATION.md](VALIDATION.md) for results.
 
+Version 0.2.0 adds controlled server pins, remembered stable/experimental channels,
+archived project downloads, downgrade protection and publication after GitHub CI.
+The suite contains 91 tests, including four native database migration tests when
+the pinned executable fixture is supplied. See [VALIDATION.md](VALIDATION.md) for
+the tested build and scope.
+
 Actual client login/gameplay has not been tested in this environment.
 
 ## Project scope and third-party rights
@@ -312,8 +357,11 @@ certificate keys. Obtain any third-party software through an authorized source
 and use it only where you have the necessary rights.
 
 At runtime, the tool imports an existing installation selected by the user,
-including its local saves and cached files, and downloads compiled EpinelPS builds
-from upstream. The upstream server may retrieve additional game resources during
+including its local saves and cached files, and downloads archived, pinned
+EpinelPS builds from this project's Releases. The experimental channel downloads
+compiled builds from upstream. Separate server releases include the original
+upstream certificate package and corresponding upstream source; they are distinct
+from the manager's own source/update archive. The upstream server may retrieve additional game resources during
 operation. Those downloaded or imported materials are not relicensed by this
 project. A public download URL or an upstream open-source license does not itself
 establish permission to use or redistribute third-party game content.
@@ -340,13 +388,13 @@ repository are distributed under the **GNU Affero General Public License,
 version 3**; see [LICENSE](LICENSE). The full license text is retained unchanged.
 The complete source and helper build script accompany the precompiled startup
 helper in the maintenance archive. Documentation and publication notices were
-updated on 27 October 2026; the application version is 0.1.4.
+updated on 30 October 2026; the application version is 0.2.0.
 
 Upstream projects retain their authorship, copyright notices, and license terms:
 
 | Project | Role | Source and license |
 | --- | --- | --- |
-| EpinelPS | Server implementation; compiled builds are downloaded separately at runtime. | [Upstream source](https://github.com/EpinelPS/EpinelPS) · [AGPL-3.0 license](https://github.com/EpinelPS/EpinelPS/blob/main/LICENSE) |
+| EpinelPS | Server implementation; pinned builds and corresponding source are archived separately in project Releases. | [Upstream source](https://github.com/EpinelPS/EpinelPS) · [AGPL-3.0 license](https://github.com/EpinelPS/EpinelPS/blob/main/LICENSE) |
 | EpinelPSLauncher | Separate Linux launcher; compatibility reference for game-side trust handling. Its executable is not bundled here. | [Upstream source](https://github.com/EpinelPS/EpinelPSLauncher) · [AGPL-3.0 license](https://github.com/EpinelPS/EpinelPSLauncher/blob/master/LICENSE) |
 
 When distributing covered software, preserve applicable notices and satisfy the

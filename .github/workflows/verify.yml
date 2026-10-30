@@ -1,0 +1,130 @@
+name: Verify and publish approved server
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.14']
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run manager regressions
+        run: python -W error::ResourceWarning -m unittest discover -s tests -v
+      - name: Check shell entry points
+        run: |
+          for script in Start-EpinelPS.sh Apply-Update.sh Install-Desktop-Shortcut.sh tools/build_startup_hook.sh; do
+            sh -n "$script"
+          done
+          ./EpinelPS --version
+
+  native:
+    needs: regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Prepare the exact approved binary and check strict certificate repair
+        id: fixture
+        run: python tools/prepare_server.py --output "$RUNNER_TEMP/approved" --github-output "$GITHUB_OUTPUT"
+      - name: Run all regressions including the real upstream migrations
+        env:
+          EPINEL_TEST_SERVER: ${{ steps.fixture.outputs.executable }}
+        run: python -W error::ResourceWarning -m unittest discover -s tests -v
+
+  publish:
+    needs: [regression, native]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'seba970423/EpinelPS-Manager'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: approved-server-publication
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Prepare verified publication bytes
+        id: fixture
+        run: python tools/prepare_server.py --output "$RUNNER_TEMP/approved" --github-output "$GITHUB_OUTPUT"
+      - name: Archive the approved server with its corresponding source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SERVER_RELEASE: ${{ steps.fixture.outputs.release }}
+          SERVER_COMMIT: ${{ steps.fixture.outputs.commit }}
+          SERVER_ARCHIVE: ${{ steps.fixture.outputs.archive }}
+        run: |
+          if gh release view "$SERVER_RELEASE" >/dev/null 2>&1; then
+            gh release download "$SERVER_RELEASE" --pattern server-release.json --dir "$RUNNER_TEMP/existing-pin"
+            cmp server-release.json "$RUNNER_TEMP/existing-pin/server-release.json"
+            test "$(gh release view "$SERVER_RELEASE" --json isDraft --jq .isDraft)" = false
+            echo "Approved server release already exists; leaving its assets unchanged."
+            exit 0
+          fi
+          assets="$RUNNER_TEMP/approved"
+          source_name="EpinelPS-source-$SERVER_COMMIT.tar.gz"
+          curl --fail --location --retry 3 --connect-timeout 30 \
+            "https://github.com/EpinelPS/EpinelPS/archive/$SERVER_COMMIT.tar.gz" --output "$assets/$source_name"
+          cp server-release.json "$assets/server-release.json"
+          python - "$assets/$source_name" <<'PY'
+          import sys, tarfile
+          with tarfile.open(sys.argv[1]) as source:
+              assert any(name.endswith('/LICENSE') for name in source.getnames()), 'Source license is missing'
+          PY
+          (cd "$assets" && sha256sum EpinelPS_linux_x64.zip "$source_name" server-release.json > SHA256SUMS)
+          cat > "$RUNNER_TEMP/server-notes.md" <<EOF
+          Exact upstream server build selected by EpinelPS Managed, with its corresponding source and checksums.
+
+          Source commit: $SERVER_COMMIT
+
+          Use EpinelPS Managed 0.2.0 or later for certificate repair, migration ordering and save recovery.
+          CI verifies manager regressions and real database migrations; it does not verify game login or gameplay.
+          Upstream source and binaries retain their AGPL-3.0 license and notices.
+          EOF
+          gh release create "$SERVER_RELEASE" "$SERVER_ARCHIVE" "$assets/$source_name" \
+            "$assets/server-release.json" "$assets/SHA256SUMS" --draft --target "$GITHUB_SHA" \
+            --title "Approved server $SERVER_RELEASE" --notes-file "$RUNNER_TEMP/server-notes.md"
+          gh release edit "$SERVER_RELEASE" --draft=false
+      - name: Publish the manager update package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version="$(python -c 'from epinel_manager import __version__; print(__version__)')"
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "Manager version already published; leaving its assets unchanged."
+            exit 0
+          fi
+          package="EpinelPS-Managed-v$version-linux-x86_64.tar.gz"
+          git archive --format=tar --prefix=EpinelPS-Managed/ HEAD | gzip -n > "$RUNNER_TEMP/$package"
+          (cd "$RUNNER_TEMP" && sha256sum "$package" > "$package.sha256")
+          cat > "$RUNNER_TEMP/manager-notes.md" <<'EOF'
+          Normal startup follows this project's pinned server release. Upstream's latest build is available through the explicit experimental channel.
+
+          Existing certificate repair, save backups and failed-start rollback remain enabled. Newer or unknown installations are preserved unless an explicit stable adoption is requested.
+
+          Existing users: extract the package separately, close the managed server, then run Apply-Update.sh. Read README.md for setup and channel controls.
+          EOF
+          gh release create "v$version" "$RUNNER_TEMP/$package" "$RUNNER_TEMP/$package.sha256" \
+            --draft --target "$GITHUB_SHA" --title "EpinelPS Managed $version" --notes-file "$RUNNER_TEMP/manager-notes.md"
+          gh release edit "v$version" --draft=false
